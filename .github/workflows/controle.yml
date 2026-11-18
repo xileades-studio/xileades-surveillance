@@ -1,0 +1,27 @@
+name: Contrôle de disponibilité
+
+# Toutes les 5 minutes, et à la demande. Dépôt public : minutes gratuites.
+# Un échec envoie le courriel natif de GitHub à la personne qui a modifié en dernier la planification.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+# Lecture seule, aucun secret, aucun déclenchement par une pull request extérieure.
+permissions:
+  contents: read
+
+concurrency:
+  group: controle
+  cancel-in-progress: false
+
+jobs:
+  controle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Pas d'action tierce : le script est lu directement depuis ce dépôt, au commit en cours.
+      - name: Récupérer le script
+        run: curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/controle.sh" -o controle.sh
+      - name: Contrôler
+        run: bash controle.sh "xileades.com projet.xileades.com" "xileades.com" | tee -a "$GITHUB_STEP_SUMMARY"
