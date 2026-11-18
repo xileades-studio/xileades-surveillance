@@ -24,4 +24,4 @@ jobs:
       - name: Récupérer le script
         run: curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/controle.sh" -o controle.sh
       - name: Contrôler
-        run: bash controle.sh "xileades.com projet.xileades.com" "xileades.com" | tee -a "$GITHUB_STEP_SUMMARY"
+        run: bash controle.sh "xileades.com projet.xileades.com" "xileades.com" "xileades-website=https://yxufqwpzzxzqyvcofeml.supabase.co/functions/v1/sante" | tee -a "$GITHUB_STEP_SUMMARY"
