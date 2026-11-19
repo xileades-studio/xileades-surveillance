@@ -1,15 +1,24 @@
 name: Contrôle de disponibilité
 
-# Toutes les 5 minutes, et à la demande. Dépôt public : minutes gratuites.
-# Un échec envoie le courriel natif de GitHub à la personne qui a modifié en dernier la planification.
+# Cadence (constat du 19/11/2026) : la planification « toutes les 5 minutes » de GitHub n'a tourné que 2 fois en 24 h.
+# D'où une chaîne : chaque exécution contrôle toutes les 5 minutes pendant 50 minutes environ, puis se relance
+# elle-même (workflow_dispatch par le jeton du dépôt, seul déclenchement que GitHub accepte d'un GITHUB_TOKEN).
+# La planification horaire reste en filet si la chaîne casse ; le groupe de concurrence garde une seule chaîne.
+# Alerte : en cas d'échec, l'exécution relance d'abord la suivante, puis échoue ; GitHub envoie son courriel natif.
+# Dépôt public : minutes gratuites. Aucun secret.
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '7 * * * *'
   workflow_dispatch:
+    inputs:
+      temoin_negatif:
+        description: "Essai : ajoute une cible qui doit échouer (preuve que l'alerte part)"
+        type: boolean
+        default: false
 
-# Lecture seule, aucun secret, aucun déclenchement par une pull request extérieure.
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: controle
@@ -18,10 +27,32 @@ concurrency:
 jobs:
   controle:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash    # explicite : active -o pipefail, sans quoi le tee masque un échec du contrôle
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TOURS: 10
     steps:
       # Pas d'action tierce : le script est lu directement depuis ce dépôt, au commit en cours.
       - name: Récupérer le script
         run: curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/scripts/controle.sh" -o controle.sh
-      - name: Contrôler
-        run: bash controle.sh "xileades.com projet.xileades.com" "xileades.com" "xileades-website=https://yxufqwpzzxzqyvcofeml.supabase.co/functions/v1/sante" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Contrôler toutes les 5 minutes, puis passer la main
+        run: |
+          set -o pipefail
+          relancer() { gh workflow run controle.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" || echo "::warning::relance impossible, le filet horaire reprendra"; }
+          SANTE_EN_PLUS=""
+          if [ "${{ inputs.temoin_negatif }}" = "true" ]; then SANTE_EN_PLUS=" temoin-negatif=https://httpbin.org/status/503"; TOURS=1; fi
+          for tour in $(seq 1 "$TOURS"); do
+            debut=$(date +%s)
+            echo "### Tour $tour/$TOURS — $(date -u '+%d/%m/%Y %H:%M UTC')" | tee -a "$GITHUB_STEP_SUMMARY"
+            if ! bash controle.sh "xileades.com projet.xileades.com" "xileades.com" "xileades-website=https://yxufqwpzzxzqyvcofeml.supabase.co/functions/v1/sante$SANTE_EN_PLUS" | tee -a "$GITHUB_STEP_SUMMARY"; then
+              [ "${{ inputs.temoin_negatif }}" = "true" ] || relancer
+              echo "::error::contrôle en échec au tour $tour"
+              exit 1
+            fi
+            [ "$tour" -lt "$TOURS" ] && sleep $(( 300 - ( $(date +%s) - debut ) > 0 ? 300 - ( $(date +%s) - debut ) : 0 ))
+          done
+          [ "${{ inputs.temoin_negatif }}" = "true" ] || relancer
+
