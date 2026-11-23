@@ -4,7 +4,8 @@ name: Contrôle de disponibilité
 # D'où une chaîne : chaque exécution contrôle toutes les 5 minutes pendant 50 minutes environ, puis se relance
 # elle-même (workflow_dispatch par le jeton du dépôt, seul déclenchement que GitHub accepte d'un GITHUB_TOKEN).
 # La planification horaire reste en filet si la chaîne casse ; le groupe de concurrence garde une seule chaîne.
-# Alerte : en cas d'échec, l'exécution relance d'abord la suivante, puis échoue ; GitHub envoie son courriel natif.
+# Alerte : en cas d'échec, l'exécution attend la fin de l'intervalle de 5 min, relance la suivante, puis échoue ;
+# GitHub envoie son courriel natif. Une panne durable donne donc au plus un échec toutes les 5 minutes, pas une boucle.
 # Dépôt public : minutes gratuites. Aucun secret.
 on:
   schedule:
@@ -48,7 +49,12 @@ jobs:
             debut=$(date +%s)
             echo "### Tour $tour/$TOURS — $(date -u '+%d/%m/%Y %H:%M UTC')" | tee -a "$GITHUB_STEP_SUMMARY"
             if ! bash controle.sh "xileades.com projet.xileades.com" "xileades.com" "xileades-website=https://yxufqwpzzxzqyvcofeml.supabase.co/functions/v1/sante$SANTE_EN_PLUS" | tee -a "$GITHUB_STEP_SUMMARY"; then
-              [ "${{ inputs.temoin_negatif }}" = "true" ] || relancer
+              if [ "${{ inputs.temoin_negatif }}" != "true" ]; then
+                # Attendre la fin de l'intervalle de 5 min avant de passer la main. Sans cette attente, un échec
+                # relançait la chaîne aussitôt : boucle de milliers d'exécutions de 12 s (constat du 23/11/2026).
+                reste=$(( 300 - ( $(date +%s) - debut ) )); [ "$reste" -gt 0 ] && sleep "$reste"
+                relancer
+              fi
               echo "::error::contrôle en échec au tour $tour"
               exit 1
             fi
